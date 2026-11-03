@@ -89,6 +89,23 @@ else
             --enable-outdev=v4l2
             --enable-encoder=rawvideo
         )
+    elif [[ "$HOST" == win* ]]
+    then
+        # client audio forwarding: capture PC mic via dshow, encode with libopus
+        conf+=(
+            --enable-avdevice
+            --enable-indev=dshow
+            --enable-libopus
+            --enable-encoder=libopus
+            --enable-demuxer=wav
+            --enable-demuxer=mp3
+            --enable-demuxer=ogg
+            --enable-demuxer=flac
+            --enable-decoder=mp3
+            --enable-decoder=vorbis
+            --enable-parser=mpegaudio
+            --enable-parser=flac
+        )
     else
         # libavdevice is only used for V4L2 on Linux
         conf+=(

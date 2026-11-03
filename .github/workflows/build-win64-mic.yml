@@ -1,0 +1,59 @@
+name: Build win64 (client mic)
+
+on:
+  push:
+    branches: [win-client-mic]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  VERSION: client-mic
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GRADLE: gradle
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y meson ninja-build nasm autoconf automake libtool \
+             mingw-w64 mingw-w64-tools libz-mingw-w64-dev zip
+
+      - name: Build server
+        run: release/build_server.sh
+
+      - name: Build win64 client
+        run: release/build_windows.sh 64
+
+      - name: Package
+        run: |
+          D=release/work/build-win64/dist
+          cp release/work/build-server/server/scrcpy-server "$D/"
+          mkdir -p out
+          cp -r "$D" out/scrcpy-win64-client-mic
+          cd out && zip -r scrcpy-win64-client-mic.zip scrcpy-win64-client-mic
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scrcpy-win64-client-mic
+          path: out/scrcpy-win64-client-mic.zip
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete client-mic-win64 -y --cleanup-tag || true
+          gh release create client-mic-win64 out/scrcpy-win64-client-mic.zip \
+            --target "$GITHUB_SHA" --title "scrcpy win64 + client mic (PR #6439)" \
+            --notes "Unofficial build of Genymobile/scrcpy PR #6439 (Cabbache forward-client-microphone) for Windows x64. Usage: scrcpy --list-client-audio-sources ; scrcpy --client-audio-source \"audio=<mic name>\""
