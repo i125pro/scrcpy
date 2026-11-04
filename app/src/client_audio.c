@@ -8,6 +8,8 @@
 #include <libavutil/audio_fifo.h>
 #include <libavutil/time.h>
 #include <libswresample/swresample.h>
+#include <libavutil/samplefmt.h>
+#include <libavutil/dict.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -173,7 +175,15 @@ sc_microphone_run(void *data) {
             goto cleanup;
         }
 
-        if (avformat_open_input(&fmt_ctx, input_path, input_format, NULL) < 0) {
+        AVDictionary *dev_opts = NULL;
+        if (!strcmp(format_name, "dshow")) {
+            // default dshow buffer is ~500 ms; keep latency low
+            av_dict_set(&dev_opts, "audio_buffer_size", "20", 0);
+        }
+        int open_ret = avformat_open_input(&fmt_ctx, input_path, input_format,
+                                           &dev_opts);
+        av_dict_free(&dev_opts);
+        if (open_ret < 0) {
             LOGE("Could not open audio device '%s'", input_path);
             goto cleanup;
         }
@@ -325,14 +335,28 @@ sc_microphone_run(void *data) {
 
         while (avcodec_receive_frame(in_codec_ctx, in_frame) >= 0) {
             // Resample to Opus format
+            // Output buffer must hold everything the resampler can produce
+            // for this input, otherwise the excess stays stuck inside swr
+            // (device packets can be hundreds of ms long)
+            int max_out = swr_get_out_samples(swr_ctx, in_frame->nb_samples);
+            if (max_out <= 0)
+                continue;
+            uint8_t **rs_buf = NULL;
+            if (av_samples_alloc_array_and_samples(&rs_buf, NULL,
+                        opus_ctx->ch_layout.nb_channels, max_out,
+                        opus_ctx->sample_fmt, 0) < 0) {
+                LOGE("Could not allocate resample buffer");
+                continue;
+            }
             int out_samples =
-                    swr_convert(swr_ctx, (uint8_t **)out_frame->data, opus_ctx->frame_size,
-                                            (const uint8_t **)in_frame->data, in_frame->nb_samples);
-
+                    swr_convert(swr_ctx, rs_buf, max_out,
+                                (const uint8_t **)in_frame->data, in_frame->nb_samples);
+            if (out_samples > 0)
+                av_audio_fifo_write(fifo, (void **)rs_buf, out_samples);
+            av_freep(&rs_buf[0]);
+            av_freep(&rs_buf);
             if (out_samples <= 0)
                 continue;
-
-            av_audio_fifo_write(fifo, (void **)out_frame->data, out_samples);
 
             while (av_audio_fifo_size(fifo) >= opus_ctx->frame_size) {
                 av_audio_fifo_read(fifo, (void **)out_frame->data,

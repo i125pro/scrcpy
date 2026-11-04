@@ -98,6 +98,7 @@ else
             --enable-libopus
             --enable-encoder=libopus
             --enable-demuxer=wav
+            --enable-demuxer=mov
             --enable-demuxer=mp3
             --enable-demuxer=ogg
             --enable-demuxer=flac
